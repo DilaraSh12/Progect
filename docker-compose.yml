@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - .:/app
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=development
+    depends_on:
+      - db
+    command: flask run --host=0.0.0.0
+
+  db:
+    image: "python:3.9-slim"
+    volumes:
+      - ./data:/data
+    environment:
+      - DB_NAME=newflask.db
+    command: python -m http.server 8000
