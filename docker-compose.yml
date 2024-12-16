@@ -3,21 +3,19 @@ version: '3.8'
 services:
   app:
     build: .
+    container_name: flask_app
     ports:
       - "5000:5000"
     volumes:
       - .:/app
-    environment:
-      - FLASK_APP=app.py
-      - FLASK_ENV=development
-    depends_on:
-      - db
-    command: flask run --host=0.0.0.0
+    command: python app.py  # Убедитесь, что вы запускаете Flask-приложение
 
   db:
-    image: "python:3.9-slim"
+    image: nouchka/sqlite3:latest
+    container_name: sqlite_db
     volumes:
-      - ./data:/data
-    environment:
-      - DB_NAME=newflask.db
-    command: python -m http.server 8000
+      - sqlite_data:/var/lib/sqlite
+
+volumes:
+  sqlite_data:
+    driver: local

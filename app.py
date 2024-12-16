@@ -45,5 +45,5 @@ with app.app_context():
 
 if __name__ == '__main__':
     with app.app_context():
-        get_data("https://www.sushifuji.ru/")
-    app.run(debug=True)
+        get_data("https://sushifuji.ru/ufa/menu/", db, Product)
+    app.run(host='0.0.0.0', port=5000)
