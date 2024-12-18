@@ -30,15 +30,20 @@ def filter_products(min=None, max=None):
 
     return filtered_products
 
+
 @app.route("/")
 def index():
     min_price = request.args.get('min_price', type=float, default=None)
     max_price = request.args.get('max_price', type=float, default=None)
-    if min_price is not None or max_price is not None:
-        products = filter_products(min=min_price, max=max_price)
-    else:
-        products = Product.query.all()
-    return render_template('index.html', products=products)
+    order = request.args.get('order', default=None)
+
+    products = filter_products(min=min_price, max=max_price) if min_price is not None or max_price is not None else Product.query.all()
+
+    if order:
+        products.sort(key=lambda product: extract_price(product.price_with_sale), reverse=(order == 'desc'))
+
+    return render_template('index.html', products=products, order=order, min_price=min_price, max_price=max_price)
+
 
 with app.app_context():
     db.create_all()
