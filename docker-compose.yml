@@ -2,13 +2,15 @@ version: '3.8'
 
 services:
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: project_files/Dockerfile
     container_name: flask_app
     ports:
       - "5000:5000"
     volumes:
-      - .:/app
-    command: python app.py  # Убедитесь, что вы запускаете Flask-приложение
+      - ./project_files:/app
+    command: python app.py
 
   db:
     image: nouchka/sqlite3:latest
