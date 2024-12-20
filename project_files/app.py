@@ -1,54 +1,126 @@
+import os
+import sqlite3
 from flask import Flask, render_template, request
-from flask_sqlalchemy import SQLAlchemy
-import re
-from scraper import get_data
+import requests
+from bs4 import BeautifulSoup
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///newflask.db'
-db = SQLAlchemy(app)
 
-class Product(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(300), nullable=False)
-    price_with_sale = db.Column(db.String(100))
-    image_url = db.Column(db.String(500))
+def get_db_path():
+    db_dir = os.path.dirname('rolls.db')
+    if db_dir and not os.path.exists(db_dir):
+        os.makedirs(db_dir)
+    return 'rolls.db'
 
 
-def extract_price(price_str):
-    if isinstance(price_str, str):
-        price = re.sub(r'\D', '', price_str)
-        return float(price) if price else 0.0
-    return 0.0
+def create_table():
+    db_path = get_db_path()
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(''' 
+        CREATE TABLE IF NOT EXISTS rolls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            ingredients TEXT,
+            weight TEXT,
+            image_url TEXT,
+            category TEXT,
+            price TEXT
+        )
+        ''')
+        conn.commit()
 
-def filter_products(min=None, max=None):
-    products = Product.query.all()
-    filtered_products = []
-    for product in products:
-        price = extract_price(product.price_with_sale)
-        if (min is None or price >= min) and (max is None or price <= max):
-            filtered_products.append(product)
 
-    return filtered_products
+def parse_rolls():
+    urls = [
+        ("https://momohit.ru/firmennie-rolli", "Фирменные"),
+        ("https://momohit.ru/tempura-rolli", "Темпура"),
+        ("https://momohit.ru/zapechennie-rolli", "Запеченные")
+    ]
+
+    db_path = get_db_path()
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+
+        for url, category in urls:
+            response = requests.get(url)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                roll_items = soup.find_all('div', class_='product-item')
+
+                for roll_item in roll_items:
+                    name_tag = roll_item.find('h3', class_='title')
+                    name = name_tag.text.strip() if name_tag else 'Без названия'
+
+                    ingredients_tag = roll_item.find('p', class_='desc')
+                    ingredients = ingredients_tag.text.strip() if ingredients_tag else 'Не указан'
+
+                    weight_tag = roll_item.find('span', class_='s_h3')
+                    weight = weight_tag.text.strip() if weight_tag else 'Не указан'
+
+                    image_tag = roll_item.find('img', class_='lazyImg')
+                    image_url = image_tag['data-original'] if image_tag else 'Не указано'
+
+                    cost_line = roll_item.find('div', class_='cost-line')
+                    price_tag = cost_line.find('p', class_='cost') if cost_line else None
+                    price = price_tag.text.strip() if price_tag else 'Не указана'
+
+                    cursor.execute('''
+                    SELECT COUNT(*) FROM rolls WHERE name = ? AND price = ?
+                    ''', (name, price))
+                    count = cursor.fetchone()[0]
+
+                    if count == 0:
+                        cursor.execute('''
+                        INSERT INTO rolls (name, ingredients, weight, image_url, category, price)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        ''', (name, ingredients, weight, image_url, category, price))
+            else:
+                print(f"Ошибка загрузки URL {url} (Статус: {response.status_code})")
+
+        conn.commit()
 
 
-@app.route("/")
+def get_rolls(sort=None):
+    db_path = get_db_path()
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.cursor()
+        query = "SELECT name, ingredients, weight, image_url, price FROM rolls"
+        params = []
+
+        if sort:
+            if sort == "weight_asc":
+                query += " ORDER BY CAST(weight AS INTEGER) ASC"
+            elif sort == "weight_desc":
+                query += " ORDER BY CAST(weight AS INTEGER) DESC"
+            elif sort == "ingredient_los":
+                query += " WHERE ingredients LIKE ?"
+                params.append("%лосось%")
+            elif sort == "ingredient_tun":
+                query += " WHERE ingredients LIKE ?"
+                params.append("%тунец%")
+            elif sort == "ingredient_krev":
+                query += " WHERE ingredients LIKE ?"
+                params.append("%креветки%")
+
+        cursor.execute(query, params)
+        rolls = [{'name': row[0], 'ingredients': row[1], 'weight': row[2], 'image_url': row[3], 'price': row[4]} for row in cursor.fetchall()]
+
+    return rolls
+
+
+@app.route("/", methods=["GET", "POST"])
 def index():
-    min_price = request.args.get('min_price', type=float, default=None)
-    max_price = request.args.get('max_price', type=float, default=None)
-    order = request.args.get('order', default=None)
+    sort = request.args.get("sort")
+    rolls = get_rolls(sort)
+    no_rolls_message = None
+    if sort and not rolls:
+        no_rolls_message = "Нет роллов с выбранным продуктом."
 
-    products = filter_products(min=min_price, max=max_price) if min_price is not None or max_price is not None else Product.query.all()
-
-    if order:
-        products.sort(key=lambda product: extract_price(product.price_with_sale), reverse=(order == 'desc'))
-
-    return render_template('index.html', products=products, order=order, min_price=min_price, max_price=max_price)
+    return render_template("index.html", rolls=rolls, sort=sort, no_rolls_message=no_rolls_message)
 
 
-with app.app_context():
-    db.create_all()
-
-if __name__ == '__main__':
-    with app.app_context():
-        get_data("https://sushifuji.ru/ufa/menu/", db, Product)
-    app.run(host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    create_table()
+    parse_rolls()
+    app.run(host="0.0.0.0", port=5000)
